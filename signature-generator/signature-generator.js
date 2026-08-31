@@ -60,8 +60,8 @@ const employees = parseCSV(fs.readFileSync(csvPath, "utf8"));
 
 // Company details, shared by every signature
 const company = {
-  logo: "Logo%20white%20cameo.png",  // SleepOver white cameo lockup
-  logoWidth: 138,
+  logo: "logo%20(2).png",  // SleepOver INTERNATIONAL lockup (468x97)
+  logoWidth: 154,
   logoHeight: 32,
   phone: "+27 (0)10 110 9910",
   website: "sleepover.travel",
@@ -77,21 +77,25 @@ const company = {
 };
 
 /* ---------- dark mode ------------------------------------------------------
-   Same solution as the African signatures: the signature has NO background of
-   its own and every colour is a mid-tone that reads on white and on dark alike.
+   The signature paints NO background of its own, so it sits on whatever the
+   client gives it. Media queries, prefers-color-scheme and [data-ogsc] hooks
+   are useless here: the signature is pasted into the client's signature form,
+   which keeps the inline styles and throws the <style> block away.
 
-   Media queries, prefers-color-scheme and [data-ogsc] hooks are useless here,
-   because the signature is pasted into the client's signature form, which keeps
-   the inline styles and throws the <style> block away. And Outlook/Gmail dark
-   mode either recolours the light background or inverts the whole card, so any
-   colour that only works on white is going to break sooner or later.
+   All type is pure black, and that is deliberate. Gmail and Outlook dark mode
+   do not read a colour and leave it alone: they run a lightness inversion over
+   any message that looks light to them, and pure black is the value that comes
+   out the other side as near-white. A mid-tone only gets nudged, which is why
+   #3A0000 or #8C6E80 end up muddy instead of legible. Black in, white out.
 
-   The two rules that keep it safe:
-     1. Never paint a background on the card. What is transparent adapts.
-     2. Every colour, in CSS and inside the artwork, has to clear ~4:1 against
-        white AND against near-black. The palette below is measured for that.
-        Filled shapes (the yellow pill, the round icons) are fine as they are:
-        they carry their own contrast with them whichever way the client flips.
+   What this does NOT cover is a client that darkens the card but skips the
+   inversion. There the text stays black on dark. Gmail and Outlook both invert,
+   so this is the right trade for them; the dark preview on the generated page
+   is that worst case, not what Gmail actually shows.
+
+   Artwork is never inverted by any client, so the yellow lockup, the
+   yellow-and-purple name and the round icons carry their own fill and read
+   either way.
 --------------------------------------------------------------------------- */
 
 /* ---------- design tokens (measured on the mockup, scale 0.615) ---------- */
@@ -99,15 +103,18 @@ const T = {
   width: 594,
   leftCol: 380,
   rightCol: 213,
+  // Breathing room on either side of the vertical rule. The left column keeps
+  // its own padding-right because clients that compress the signature (Gmail on
+  // a phone) collapse the 380px cell down to the width of the email address,
+  // which would otherwise sit flush against the rule.
+  gutterLeft: 22,
+  gutterRight: 25,
   rulerHeight: 148,
   pad: 16,
-  // contrast vs #FFFFFF / vs #121212
-  ink: "#8C6E80",        // 4.5 / 4.2  body copy
-  nameInk: "#8C6E80",    // 4.5 / 4.2  first word of the name
-  purple: "#A05FB8",     // 4.4 / 4.3  surname, links
-  pillBg: "#FFF8BD",
-  pillInk: "#2E0036",
-  rule: "#927373",       // 4.3 / 4.4
+  // Pure black, so the dark-mode inversion in Gmail and Outlook turns it into
+  // near-white. See the note above.
+  ink: "#000000",
+  rule: "#000000",
   font: "'Nunito Sans','Segoe UI',Arial,Helvetica,sans-serif",
   // The brand face is a heavy rounded display type and no email client can load
   // a webfont reliably, so the name falls back to the heaviest thing that is
@@ -116,30 +123,26 @@ const T = {
   fontCondensed: "'Arial Narrow',Arial,Helvetica,sans-serif",
   size: 11,
   leading: 14,
-  // The pill is deliberately off-axis in the artwork. Measured from the mockup:
-  // cap-top -2.51 deg, baseline -2.31 deg, bottom edge -2.28 deg.
-  pillTilt: -2.4,
-  // The name image is 34px tall but its baseline sits at ~27px; the remaining
-  // 7px are the descender of "Bunting". In the artwork the pill tucks under the
-  // baseline, so it has to be pulled up over that descender. Outlook desktop
-  // drops negative margins and simply leaves the pill 8px lower, with no overlap
-  // to resolve.
-  pillOverlap: 8
+  // Name artwork, half of the 389x115 export so it stays sharp on retina.
+  nameW: 196,
+  nameH: 58
 };
-
-// +27 (0)84 287 2596 -> tel:+27842872596  (the national 0 is dropped)
-const tel = (n) => "tel:" + n.replace(/\(0\)/g, "").replace(/[^\d+]/g, "");
 
 const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-/** Icon + text row. `lines` is either a string or an array (multi-line block). */
+/** Icon + text row. `lines` is either a string or an array (multi-line block).
+    `href` may be null: the two phone numbers are deliberately not links. */
 function contactRow(icon, lines, href, topPad) {
   const multi = Array.isArray(lines);
   const valign = multi ? "top" : "middle";
   const link = (inner) => `<a href="${href}"${href.startsWith("http") ? ' target="_blank"' : ""} style="color:${T.ink};text-decoration:none;">${inner}</a>`;
-  const body = multi
-    ? (href ? link(lines.join('<br />')) : lines.join('<br />'))
-    : (href ? link(lines) : lines);
+  // Bare text is still wrapped in a styled span. Phones and Gmail auto-detect
+  // phone numbers and paint their own blue underlined link around them; a span
+  // that already carries the colour and text-decoration is what most clients
+  // keep, so the number goes on reading as text.
+  const plain = (inner) => `<span style="color:${T.ink};text-decoration:none;">${inner}</span>`;
+  const wrap = href ? link : plain;
+  const body = wrap(multi ? lines.join('<br />') : lines);
 
   return `
               <tr>
@@ -160,37 +163,29 @@ function contactRow(icon, lines, href, topPad) {
 /** Name block: brand artwork when nameImage is set, live text otherwise. */
 function nameBlock(emp) {
   if (!emp.nameImage) {
-    const [first, ...rest] = emp.name.split(/\s+/);
-    return `<div style="font-family:${T.nameFont};font-size:26px;line-height:34px;font-weight:900;letter-spacing:-0.4px;color:${T.nameInk};white-space:nowrap;">${esc(first)}${rest.length ? ` <span style="color:${T.purple};">${esc(rest.join(" "))}</span>` : ""}</div>`;
+    return `<div style="font-family:${T.nameFont};font-size:32px;line-height:34px;font-weight:900;letter-spacing:-0.4px;color:${T.ink};white-space:nowrap;">${esc(emp.name)}</div>`;
   }
 
-  // position:relative lifts the name above the pill so the letters of the first
-  // word overlap the yellow, as in the artwork, instead of being covered by it.
-  return `<img src="${CDN_BASE}${encodeURI(emp.nameImage)}" width="193" height="34" alt="${esc(emp.name)}" style="display:block;border:0;outline:none;position:relative;z-index:2;width:193px;height:34px;font-family:${T.font};font-size:26px;line-height:34px;font-weight:800;color:${T.nameInk};" />`;
+  return `<img src="${CDN_BASE}${encodeURI(emp.nameImage)}" width="${T.nameW}" height="${T.nameH}" alt="${esc(emp.name)}" style="display:block;border:0;outline:none;width:${T.nameW}px;height:${T.nameH}px;font-family:${T.nameFont};font-size:26px;line-height:34px;font-weight:800;color:${T.ink};" />`;
 }
 
-/** Job-title pill. Rendered only when the CSV row carries a position. */
-function pill(emp) {
-  if (!emp.position) return "";
+/** True when the job title has to be typeset. Artwork already contains it. */
+const hasTextTitle = (emp) => !!emp.position && !emp.nameImage;
+
+/** Job title, plain capitals. Skipped when the name artwork already has it. */
+function title(emp) {
+  if (!hasTextTitle(emp)) return "";
+  // Uppercased in JS as well as in CSS: Outlook desktop (Word engine) ignores
+  // text-transform, so the capitals have to be in the string itself.
   return `
               <tr>
-                <td style="padding:0;">
-                  <!-- Job-title pill. The tilt is ignored by Outlook desktop (Word
-                       engine), which simply renders it straight. The yellow fill
-                       carries its own contrast, so it survives dark mode. -->
-                  <table cellpadding="0" cellspacing="0" border="0" role="presentation" style="border-collapse:collapse;margin-top:-${T.pillOverlap}px;-webkit-transform:rotate(${T.pillTilt}deg);transform:rotate(${T.pillTilt}deg);">
-                    <tr>
-                      <td bgcolor="${T.pillBg}" style="background-color:${T.pillBg};border-radius:15px;padding:8px;font-family:${T.fontCondensed};font-size:12px;line-height:14px;mso-line-height-rule:exactly;font-weight:bold;letter-spacing:0;color:${T.pillInk};white-space:nowrap;">${esc(emp.position)}</td>
-                    </tr>
-                  </table>
-                </td>
+                <td style="padding:5px 0 0 0;font-family:${T.fontCondensed};font-size:12px;line-height:15px;mso-line-height-rule:exactly;font-weight:bold;letter-spacing:0.8px;text-transform:uppercase;color:${T.ink};white-space:nowrap;">${esc(emp.position.toUpperCase())}</td>
               </tr>`;
 }
 
 function signature(emp, id) {
   const address = emp.officeAddress ? emp.officeAddress.split("|").map((l) => l.trim()) : company.address;
-  // With no pill there is no negative margin to compensate for.
-  const phonePad = emp.position ? 8 + T.pillOverlap : 12;
+  const phonePad = hasTextTitle(emp) ? 10 : 12;
 
   return `<div id="${id}">
 <style type="text/css">
@@ -201,7 +196,7 @@ function signature(emp, id) {
   .so-col{display:block !important;width:100% !important;max-width:100% !important;padding-left:16px !important;padding-right:16px !important;box-sizing:border-box !important;}
   .so-rule{display:none !important;}
   .so-right{padding-top:16px !important;border-top:1px solid ${T.rule};}
-  .so-name img{width:100% !important;max-width:193px !important;height:auto !important;}
+  .so-name img{width:100% !important;max-width:${T.nameW}px !important;height:auto !important;}
 }
 </style>
 <table class="so-wrap" cellpadding="0" cellspacing="0" border="0" role="presentation" width="${T.width}" style="width:${T.width}px;max-width:${T.width}px;border-collapse:collapse;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;">
@@ -211,14 +206,14 @@ function signature(emp, id) {
         <tr>
 
           <!-- ============ left column ============ -->
-          <td class="so-col" width="${T.leftCol}" valign="bottom" style="width:${T.leftCol - 15}px;padding:0 0 0 15px;">
+          <td class="so-col" width="${T.leftCol}" valign="bottom" style="width:${T.leftCol - 15 - T.gutterLeft}px;padding:0 ${T.gutterLeft}px 0 15px;">
             <table cellpadding="0" cellspacing="0" border="0" role="presentation" style="border-collapse:collapse;">
               <tr>
                 <td class="so-name" style="padding:0;font-size:0;line-height:0;">
                   ${nameBlock(emp)}
                 </td>
-              </tr>${pill(emp)}
-${contactRow("phone-2.png", emp.phone, tel(emp.phone), phonePad)}
+              </tr>${title(emp)}
+${contactRow("phone-2.png", emp.phone, null, phonePad)}
 ${contactRow("mail.png", emp.email, "mailto:" + emp.email, 10)}
             </table>
           </td>
@@ -227,13 +222,13 @@ ${contactRow("mail.png", emp.email, "mailto:" + emp.email, 10)}
           <td class="so-rule" width="1" valign="top" style="width:1px;font-size:0;line-height:0;">
             <table cellpadding="0" cellspacing="0" border="0" role="presentation" width="1" style="width:1px;border-collapse:collapse;">
               <tr>
-                <td width="1" height="${T.rulerHeight}" bgcolor="${T.rule}" style="width:1px;height:${T.rulerHeight}px;background-color:${T.rule};font-size:1px;line-height:1px;">&nbsp;</td>
+                <td class="so-rule-fill" width="1" height="${T.rulerHeight}" bgcolor="${T.rule}" style="width:1px;height:${T.rulerHeight}px;background-color:${T.rule};font-size:1px;line-height:1px;">&nbsp;</td>
               </tr>
             </table>
           </td>
 
           <!-- ============ right column ============ -->
-          <td class="so-col so-right" width="${T.rightCol}" valign="top" style="width:${T.rightCol - 25}px;padding:0 0 0 25px;">
+          <td class="so-col so-right" width="${T.rightCol}" valign="top" style="width:${T.rightCol - T.gutterRight}px;padding:0 0 0 ${T.gutterRight}px;">
             <table cellpadding="0" cellspacing="0" border="0" role="presentation" style="border-collapse:collapse;">
               <tr>
                 <td style="padding:0;font-size:0;line-height:0;">
@@ -242,7 +237,7 @@ ${contactRow("mail.png", emp.email, "mailto:" + emp.email, 10)}
                   </a>
                 </td>
               </tr>
-${contactRow("phone-1.png", company.phone, tel(company.phone), 7)}
+${contactRow("phone-1.png", company.phone, null, 7)}
 ${contactRow("website.png", company.website, company.websiteUrl, 10)}
 ${contactRow("location.png", address, company.mapsUrl, 10)}
             </table>
@@ -267,15 +262,20 @@ function page(emp) {
     <title>${esc(emp.name)} - Signature</title>
 </head>
 <body>
-    <!-- The same signature twice, on white and on near-black, so both readings
-         can be checked at a glance. Only the first one is what gets copied. -->
+    <!-- The same signature twice. Only the first one is what gets copied; the
+         second is repainted by the .preview-dark rules below to imitate the
+         inversion Gmail and Outlook run on a light message. That repaint lives
+         in this page's stylesheet only, never in the copied markup. -->
     <div class="signature-container">
       <div class="preview preview-light">
 ${signature(emp, "content")}
       </div>
+      <p class="caption">Light mode &mdash; this is the markup that gets copied.</p>
       <div class="preview preview-dark">
 ${signature(emp, "content-2")}
       </div>
+      <p class="caption">Dark mode &mdash; simulated. Gmail and Outlook invert the black
+         type to white and leave the artwork alone.</p>
     </div>
 
     <div class="actions">
@@ -309,34 +309,35 @@ ${signature(emp, "content-2")}
     <p>All the data lives in <code>employees.csv</code>, one row per person. Fill it
        in and run <code>node signature-generator.js</code> to rebuild every page.</p>
     <ul>
-        <li><code>position</code> &mdash; the yellow pill. Leave it empty and the pill is
-            not rendered at all.</li>
-        <li><code>nameImage</code> &mdash; optional artwork for the name (193x34).
-            Leave it empty and the name is written as live text, which always
-            follows the palette below.</li>
+        <li><code>position</code> &mdash; the job title, printed in capitals under
+            the name. Leave it empty and the line is not rendered at all.</li>
+        <li><code>nameImage</code> &mdash; optional artwork for the name, exported at
+            ${T.nameW * 2}x${T.nameH * 2} and placed at ${T.nameW}x${T.nameH}. The current export also
+            contains the job-title sticker, so when it is set the
+            <code>position</code> line is not typeset on top of it. Leave it
+            empty and the name is live text plus a typeset title.</li>
         <li><code>officeAddress</code> &mdash; optional per-person address, lines
             separated by <code>|</code>, field wrapped in quotes.</li>
     </ul>
 
     <h2>Dark mode</h2>
-    <p>Handled the way the African signatures handle it: the signature paints no
-       background of its own, so it sits on whatever the client gives it, and
-       every colour is a mid-tone that clears roughly 4:1 against white
-       <i>and</i> against near-black. Media queries are not an option here &mdash;
-       signature forms keep the inline styles and drop the <code>&lt;style&gt;</code>
-       block.</p>
+    <p>The signature paints no background of its own, so it sits on whatever the
+       client gives it. Media queries are not an option here &mdash; signature forms
+       keep the inline styles and drop the <code>&lt;style&gt;</code> block &mdash; so
+       everything rests on the colours themselves.</p>
     <ul>
-        <li>Text <code>${T.ink}</code> &middot; surname and links <code>${T.purple}</code>
-            &middot; rule <code>${T.rule}</code>.</li>
-        <li>The yellow pill and the round icons are filled shapes: they carry
-            their own contrast, so they hold up either way.</li>
-        <li>Artwork has to follow the same rule, because no client recolours an
-            image. Anything near-black on transparency &mdash; the maroon in the name
-            artwork, the "INTERNATIONAL" wordmark in the lockup &mdash; disappears on a
-            dark background, so those two files need a re-export in
-            <code>${T.ink}</code> / <code>${T.purple}</code>. Until then, clearing
-            <code>nameImage</code> in the CSV renders the name as text and is
-            correct in both modes.</li>
+        <li>All type and the divider are pure black <code>${T.ink}</code>. Gmail
+            and Outlook dark mode run a lightness inversion over any message that
+            looks light to them, and pure black is the value that comes back as
+            near-white. A mid-tone only gets nudged, so it ends up muddy &mdash;
+            black in, white out.</li>
+        <li>The artwork is never inverted by any client, so the yellow lockup,
+            the yellow-and-purple name and the round icons carry their own fill
+            and read either way.</li>
+        <li>The dark preview above is the worst case: a client that darkens the
+            card but skips the inversion. Gmail and Outlook both invert, so what
+            they show is the light preview with the type flipped to white. Worth
+            checking on a phone before rollout.</li>
     </ul>
 
     <h2>Images</h2>
@@ -344,16 +345,16 @@ ${signature(emp, "content-2")}
        so this preview renders the exact markup that gets copied. The local
        <code>../assets/</code> folder is only the source for those uploads.</p>
     <ul>
-        <li>${emp.nameImage ? esc(emp.nameImage) + " <i>(name in the brand typeface, 193x34 &mdash; one per person)</i>" : "<i>no name artwork &mdash; the name is live text</i>"}</li>
-        <li>${decodeURIComponent(company.logo)} <i>(SleepOver International lockup)</i></li>
+        <li>${emp.nameImage ? esc(emp.nameImage) + ` <i>(name and job title in the brand typeface, ${T.nameW}x${T.nameH} &mdash; one per person)</i>` : "<i>no name artwork &mdash; the name is live text</i>"}</li>
+        <li>${decodeURIComponent(company.logo)} <i>(SleepOver INTERNATIONAL lockup)</i></li>
         <li>phone-1.png, phone-2.png, mail.png, website.png, location.png</li>
     </ul>
 
     <h2>Known client limitations</h2>
     <ul>
-        <li>Outlook desktop for Windows uses the Word engine: it ignores
-            <code>transform</code>, so the job-title pill sits straight instead of
-            tilted.</li>
+        <li>Only the email address and the website are links. Both phone numbers
+            are plain text on purpose, so no client turns them into a
+            <code>tel:</code> handler.</li>
         <li>The stacked mobile layout relies on a media query. Outlook for iOS/Android,
             Apple Mail and the Gmail app honour it when it survives the paste;
             Outlook desktop keeps the ${T.width}px two-column layout, which is the
@@ -376,6 +377,17 @@ ${signature(emp, "content-2")}
     .preview table.so-wrap{ margin:0 auto; }
     .preview-light{ background:#FFFFFF; }
     .preview-dark{ background:#121212; }
+    /* Imitates the client-side inversion: black type comes back near-white,
+       black fills too, and images are left untouched. Preview only. */
+    .preview-dark td,
+    .preview-dark div,
+    .preview-dark span,
+    .preview-dark a{ color:#FFFFFF !important; }
+    .preview-dark .so-rule-fill{ background-color:#FFFFFF !important; }
+    .caption{
+        max-width:760px; margin:6px auto 22px; color:#E7DCE4;
+        font-size:13px; line-height:1.5; text-align:center;
+    }
     .actions{
         display:flex; align-items:center; gap:14px; flex-wrap:wrap;
         margin:36px 0 44px; color:#fff; font-size:16px;
