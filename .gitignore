@@ -1,0 +1,25 @@
+# This repo publishes exactly one thing: the finished signature pages in
+# signature-generator/. Everything else -- the workbook, the build scripts, the
+# source artwork -- stays on local disk, so the public repo carries only the
+# final HTML.
+#
+# Safe to do because the pages are self-contained: every image and webfont loads
+# from magneticcreative.com, and the only relative links are between the pages
+# themselves. Nothing ignored below is needed to serve them.
+#
+# To keep working on this you still need the ignored files locally --
+# build-data.py, signature-generator.js, write-page-urls.py, the .xlsx and
+# ../assets. They are NOT backed up by this repo any more, so keep them
+# somewhere that is.
+
+# Ignore everything at the root...
+/*
+
+# ...then let back in the .gitignore and the published pages.
+!/.gitignore
+!/signature-generator/
+/signature-generator/*
+!/signature-generator/*.html
+
+# Never, on any path.
+.DS_Store
