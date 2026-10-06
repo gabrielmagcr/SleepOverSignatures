@@ -20,6 +20,7 @@
 !/signature-generator/
 /signature-generator/*
 !/signature-generator/*.html
+!/signature-generator/guide/
 
 # Never, on any path.
 .DS_Store
